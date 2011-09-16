@@ -1,13 +1,19 @@
-steal(function( steal ) {
+steal('steal/build').then(function( steal ) {
 
 	/**
 	 * Builds JavaScripts
+	 *
 	 * @param {Object} opener the result of a steal.build.open
 	 * @param {Object} options options passed to the build script
+	 * 
+	 *   * __to__  - which folder the production.css files should be put in
+	 *   * __quiet__  - tell the compressor to be less abnoxious about sending errors
+	 *   * __all__ - compress all scripts
+	 * @param {Object} dependencies array of files and the dependencies they contain under the hood
 	 */
-	var scripts = (steal.build.builders.scripts = function( opener, options ) {
+	var scripts = (steal.build.builders.scripts = function( opener, options, dependencies ) {
 		steal.print("\nBUILDING SCRIPTS --------------- ");
-
+		
 		// get the compressor
 		var compressor = scripts.compressors[options.compressor || "localClosure"](),
 
@@ -15,66 +21,108 @@ steal(function( steal ) {
 			packages = {},
 
 			// the current package
-			currentPackage = [];
+			currentPackage = {
+				scripts : [],
+				src : []
+			}, 
+			
+			// concatenated scripts waiting to be compressed
+			currentCollection = [],
+			 
+			compressCollection = function(currentCollection){
+				// grab the previous currentCollection and compress it, then add it to currentPackage
+				if (currentCollection.length) {
+					var compressed = currentCollection.join("\n");
+					compressed = compressor(compressed, true);
+					currentCollection = [];
+					return compressed;
+				}
+			};
 
 		// compress all scripts by default
-		if ( options.all ) {
+		if ( true/*options.all*/ ) {
 			packages['production.js'] = currentPackage;
 		}
+		
+		// if nothing can't be compressed, compress whole app in one step
 
-		// for each script we find
-		opener.each("script", function( script, text, i ) {
+		// for each steal we find
+		opener.each('js', function( stl, text, i ) {
 
+			var out = stl.rootSrc || "!";
 			// if we should ignore it, ignore it
-			if ( script.getAttribute('ignore') == "true" ) {
-				if ( script.src ) {
-					steal.print('   ignoring ' + script.src);
-				}
+			if ( stl.packaged === false ) {
+
+				steal.print('   not packaging ' + out);
+				
 				return;
 			}
-
-			// if it has a src, let people know we are compressing it
-			if ( script.src ) {
-				steal.print("   " + script.src.replace(/\?.*$/, "").replace(/^(\.\.\/)+/, ""));
+			
+			// ignore
+			if ( stl.ignore || (options.exclude && options.exclude.indexOf(stl.rootSrc) != -1)) {
+				steal.print('   ignoring ' + out);
+				return;
 			}
+			// if it has a src, let people know we are compressing it
+			
+			steal.print("   " + out);
+			
 
 			// get the package, this will be production.js
-			var pack = script.getAttribute('package');
-
+			var pack = stl['pack'];
 
 			if ( pack ) {
 				//if we don't have it, create it and set it to the current package
 				if (!packages[pack] ) {
-					packages[pack] = [];
+					packages[pack] = {scripts: [], src : []};
 				}
 				currentPackage = packages[pack];
 			}
 
 			// clean out any remove-start style comments
 			text = scripts.clean(text);
-
+			
 			// if we should compress the script, compress it
-			if ( script.getAttribute('compress') == "true" || options.all ) {
-				text = compressor(text, true);
+			if ( stl.compress !== false || options.all ) {
+				currentPackage.scripts.push("'"+stl.rootSrc+"'")
+				// put the result in the package
+				currentCollection.push(text+";\nsteal.loaded('"+stl.rootSrc+"');");
+			} 
+			else { // compress is false, don't compress it
+				var compressed = compressCollection(currentCollection);
+				currentCollection = [];
+				currentPackage.src.push(compressed);
+			
+				// add the uncompressed script to the package
+				currentPackage.scripts.push("'"+stl.rootSrc+"'");
+				currentPackage.src.push(text+";\nsteal.loaded('"+stl.rootSrc+"');");
+				
 			}
-
-			// put the result in the package
-			currentPackage.push(text);
 		});
+		
+		var compressed = compressCollection(currentCollection);
+		currentCollection = [];
+		currentPackage.src.push(compressed);
 
 		steal.print("");
 
 		// go through all the packages
 		for ( var p in packages ) {
-			if ( packages[p].length ) {
+			if ( packages[p].src.length ) {
 				//join them
-				var compressed = packages[p].join(";\n");
+				var loading = "steal.loading("+packages[p].scripts.join(',')+");\n", 
+					dependencyStr = "";
+				for (var key in dependencies){
+					dependencyStr += "steal({src: '"+key+"', has: ['"+dependencies[key].join("','")+"']});\n";
+				}
+				var compressed = packages[p].src.join("\n");
 				//save them
-				new steal.File(options.to + p).save(compressed);
+				new steal.File(options.to + p).save(loading+dependencyStr+compressed);
 				steal.print("SCRIPT BUNDLE > " + options.to + p);
 			}
 		}
 	});
+	
 	// removes  dev comments from text
 	scripts.clean = function( text ) {
 		return String(java.lang.String(text).replaceAll("(?s)\/\/@steal-remove-start(.*?)\/\/@steal-remove-end", "").replaceAll("steal[\n\s\r]*\.[\n\s\r]*dev[\n\s\r]*\.[\n\s\r]*(\\w+)[\n\s\r]*\\([^\\)]*\\)", ""));
@@ -125,6 +173,28 @@ steal(function( steal ) {
 				return "" + xhr.responseText;
 			};
 		},
+		uglify: function() {
+			steal.print("steal.compress - Using Uglify");
+			return function( src, quiet ) {
+				var rnd = Math.floor(Math.random() * 1000000 + 1),
+					origFileName = "tmp" + rnd + ".js",
+					origFile = new steal.File(origFileName);
+
+				origFile.save(src);
+
+
+				var outBaos = new java.io.ByteArrayOutputStream(),
+					output = new java.io.PrintStream(outBaos);
+					
+				runCommand("node", "steal/build/scripts/uglify/bin/uglifyjs", origFileName,
+					{ output: output }
+				);
+			
+				origFile.remove();
+
+				return outBaos.toString();
+			};
+		},
 		localClosure: function() {
 			//was unable to use SS import method, so create a temp file
 			steal.print("steal.compress - Using Google Closure app");
@@ -146,6 +216,61 @@ steal(function( steal ) {
 						output: output
 					});
 				}
+				tmpFile.remove();
+
+				return outBaos.toString();
+			};
+		},
+		localClosure: function() {
+			//was unable to use SS import method, so create a temp file
+			steal.print("steal.compress - Using Google Closure app");
+			return function( src, quiet ) {
+				var rnd = Math.floor(Math.random() * 1000000 + 1),
+					filename = "tmp" + rnd + ".js",
+					tmpFile = new steal.File(filename);
+
+				tmpFile.save(src);
+
+				var outBaos = new java.io.ByteArrayOutputStream(),
+					output = new java.io.PrintStream(outBaos);
+				if ( quiet ) {
+					runCommand("java", "-jar", "steal/build/scripts/compiler.jar", "--compilation_level", "SIMPLE_OPTIMIZATIONS", "--warning_level", "QUIET", "--js", filename, {
+						output: output
+					});
+				} else {
+					runCommand("java", "-jar", "steal/build/scripts/compiler.jar", "--compilation_level", "SIMPLE_OPTIMIZATIONS", "--js", filename, {
+						output: output
+					});
+				}
+				tmpFile.remove();
+
+				return outBaos.toString();
+			};
+		},
+		yui: function() {
+			// needs yuicompressor.jar at steal/build/scripts/yuicompressor.jar
+			steal.print("steal.compress - Using YUI compressor");
+
+			return function( src ) {
+				var rnd = Math.floor(Math.random() * 1000000 + 1),
+					filename = "tmp" + rnd + ".js",
+					tmpFile = new steal.File(filename);
+
+				tmpFile.save(src);
+
+				var outBaos = new java.io.ByteArrayOutputStream(),
+					output = new java.io.PrintStream(outBaos);
+					
+				runCommand(
+					"java", 
+					"-jar", 
+					"steal/build/scripts/yuicompressor.jar", 
+					"--charset",
+					"utf-8",
+					filename, 
+					{ output: output }
+				);
+			
 				tmpFile.remove();
 
 				return outBaos.toString();

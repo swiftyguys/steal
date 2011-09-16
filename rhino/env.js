@@ -1385,15 +1385,17 @@ urlparse.normalizepath = function(path)
 //   %7e -> %7E
 // Nor, '+' <--> %20 translation
 //
-urlparse.urlnormalize = function(url)
+urlparse.urlnormalize = function(url, allow)
 {
     var parts = urlparse.urlsplit(url);
     switch (parts.scheme) {
     case 'file':
         // files can't have query strings
         //  and we don't bother with fragments
-        parts.query = '';
-        parts.fragment = '';
+        // parts.query = '';
+        if(!allow){
+        	parts.fragment = '';
+        }
         break;
     case 'http':
     case 'https':
@@ -1434,7 +1436,6 @@ urlparse.urlsplit = function(url, default_scheme, allow_fragments)
     if (typeof allow_fragments === 'undefined') {
         allow_fragments = true;
     }
-
     // scheme (optional), host, port
     var fullurl = /^([A-Za-z]+)?(:?\/\/)([0-9.\-A-Za-z]*)(?::(\d+))?(.*)$/;
     // path, query, fragment
@@ -1474,7 +1475,6 @@ urlparse.urlsplit = function(url, default_scheme, allow_fragments)
     } else {
         o.fragment = '';
     }
-
     return o;
 };
 
@@ -1592,8 +1592,9 @@ Envjs.getcwd = function() {
  *
  * @param {Object} path  Relative or absolute URL
  * @param {Object} base  (semi-optional)  The base url used in resolving "path" above
+ 
  */
-Envjs.uri = function(path, base) {
+Envjs.uri = function(path, base, allow) {
 	path = path.replace(/\\/g, '/');
     //console.log('constructing uri from path %s and base %s', path, base);
 
@@ -1639,7 +1640,7 @@ Envjs.uri = function(path, base) {
     }
     // handles all cases if path is abosulte or relative to base
     // 3rd arg is "false" --> remove fragments
-    var newurl = urlparse.urlnormalize(urlparse.urljoin(base, path, false));
+    var newurl = urlparse.urlnormalize(urlparse.urljoin(base, path, allow ||false), allow);
 	//console.log('uri %s %s = %s', base, path, newurl);
     return newurl;
 };
@@ -1989,8 +1990,19 @@ Envjs.runAsync = function(fn, onInterupt){
 
     try{
         run = Envjs.sync(function(){
-            fn();
-            Envjs.wait();
+            if(Envjs.exitOnError){
+            	try { fn(); }
+            	catch(ex) {
+            		console.log("Rhino shell error: " + ex.message);
+            		java.lang.System.exit(1);
+            	}
+            } else {
+            	fn();
+            }
+            
+
+            //Envjs.wait();
+
         });
         Envjs.spawn(run);
     }catch(e){
@@ -2106,7 +2118,7 @@ Envjs.connection = function(xhr, responseHandler, data){
                 //try to add some canned headers that make sense
                 xhr.readyState = 4;
                 xhr.statusText = "ok";
-                xhr.responseText = Envjs.readFromFile(xhr.url);
+                xhr.responseText = Envjs.readFromFile(xhr.url.replace(/\?.+$/, ""));
                 try{
                     if(xhr.url.match(/html$/)){
                         xhr.responseHeaders["Content-Type"] = 'text/html';
@@ -8201,6 +8213,14 @@ __extend__(HTMLElement.prototype, {
         //Not in the specs but I'll leave it here for now.
         return this.xhtml;
     },
+	get clearAttributes(){
+        //Not in the specs but I'll leave it here for now.
+        return;
+    },
+	get mergeAttributes(src){
+        //Not in the specs but I'll leave it here for now.
+        return;
+    },
     scrollIntoView: function(){
         /*TODO*/
         return;
@@ -8707,7 +8727,7 @@ __extend__(HTMLAnchorElement.prototype, {
         if (!link) {
             return '';
         }
-        return Envjs.uri(link, this.ownerDocument.location.toString());
+        return Envjs.uri(link, this.ownerDocument.location.toString(), true);
     },
     set href(val) {
         return this.setAttribute("href", val);
@@ -9851,6 +9871,11 @@ __extend__(HTMLInputElement.prototype, {
     },
     toString: function() {
         return '[object HTMLInputElement]';
+    },
+    cloneNode : function(){
+        var newnode = HTMLInputAreaCommon.prototype.cloneNode.apply(this, arguments);
+        newnode.checked = this.checked;
+        return newnode;
     }
 });
 
@@ -9949,7 +9974,7 @@ __extend__(HTMLLinkElement.prototype, {
         this.setAttribute('charset',value);
     },
     get href(){
-        return this.getAttribute('href');
+		return this.getAttribute('href');
     },
     set href(value){
         this.setAttribute('href',value);
@@ -18907,7 +18932,7 @@ function $clinit_124(){
   ONCELLCHANGE = $AttributeName_0(new AttributeName, ALL_NO_NS, SAME_LOCAL('oncellchange'), ALL_NO_PREFIX, ALL_NCNAME, false);
   ONMOUSEWHEEL = $AttributeName_0(new AttributeName, ALL_NO_NS, SAME_LOCAL('onmousewheel'), ALL_NO_PREFIX, ALL_NCNAME, false);
   ONMOUSEENTER = $AttributeName_0(new AttributeName, ALL_NO_NS, SAME_LOCAL('onmouseenter'), ALL_NO_PREFIX, ALL_NCNAME, false);
-  ONAFTERPRINT = $AttributeName_0(new AttributeName, ALL_NO_NS, SAME_LOCAL('onafterprint'), ALL_NO_PREFIX, ALL_NCNAME, false);
+  ONAFTERPRINT = $AttributeName_0(new AttributeName, ALL_NO_NS, SAME_LOCAL('onafterupdate'), ALL_NO_PREFIX, ALL_NCNAME, false);
   ONBEFORECOPY = $AttributeName_0(new AttributeName, ALL_NO_NS, SAME_LOCAL('onbeforecopy'), ALL_NO_PREFIX, ALL_NCNAME, false);
   MARGINHEIGHT = $AttributeName_0(new AttributeName, ALL_NO_NS, SAME_LOCAL('marginheight'), ALL_NO_PREFIX, ALL_NCNAME, false);
   MARKERHEIGHT = $AttributeName_0(new AttributeName, ALL_NO_NS, SVG_DIFFERENT('markerheight', 'markerHeight'), ALL_NO_PREFIX, ALL_NCNAME, false);
@@ -23957,9 +23982,6 @@ var __elementPopped__ = function(ns, name, node){
                                     doc.parsing = false;
                                     //DOMContentLoaded event
                                     try{
-										if ( Envjs.killTimersAfterLoad === true ) {
-											Envjs.clear();
-										}
 										if ( Envjs.fireLoad === false ) {
 											return;
 										}
@@ -24170,6 +24192,10 @@ Location = function(url, doc, history) {
             if ($history) {
                 $history.add($url, 'hash');
             }
+            //console.log('triggering window.hashchange');
+            event = doc.createEvent('HTMLEvents');
+            event.initEvent('hashchange', false, false);
+            window.dispatchEvent( event, false );
         },
 
         get host() {
@@ -24292,7 +24318,7 @@ Location = function(url, doc, history) {
         },
 
         assign: function(url, /*non-standard*/ method, data) {
-            var _this = this,
+			var _this = this,
                 xhr,
                 event;
 			method = method||"GET";
@@ -24327,7 +24353,7 @@ Location = function(url, doc, history) {
                        		default:
 								//console.log('status is good for assignment %s', xhr.status);
 	                        	if (xhr.readyState === 4) {// update closure upvars
-					            	$url = xhr.url;
+					            	$url = url;
 						            parts = Envjs.urlsplit($url);
 	                            	//console.log('new document baseURI %s', xhr.url);
 	                            	Envjs.exchangeHTMLDocument($document, xhr.responseText, xhr.url);
@@ -24500,7 +24526,13 @@ XMLHttpRequest.prototype = {
 
             if (!_this.aborted  && !redirecting){
 				//console.log('did not abort so call onreadystatechange');
-                _this.onreadystatechange();
+                if(_this.async){
+                	setTimeout(function(){
+                		_this.onreadystatechange();
+                	},10)
+            	 } else {
+            		_this.onreadystatechange();
+            	}
             }
         }
 
@@ -25190,9 +25222,9 @@ Window = function(scope, parent, opener){
         set location(url){
 			//very important or you will go into an infinite
         	//loop when creating a xml document
-			//console.log('setting window location %s', url);
+			// console.log('setting window location %s', url);
         	if(url) {
-            	$location.assign(Envjs.uri(url, $location+''));
+            	$location.assign(Envjs.uri(url, $location+'', true));
 			}
         },
         get name(){
@@ -25342,6 +25374,8 @@ Window = function(scope, parent, opener){
         //onunload: function(){},
 		focus: function(){},
 		blur: function(){},
+		get onhashchange(){},
+		set onhashchange(){},
         get guid(){
             return $uuid;
         }
