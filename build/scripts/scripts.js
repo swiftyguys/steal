@@ -50,6 +50,16 @@ steal('steal/build').then(function( steal ) {
 		opener.each('js', function( stl, text, i ) {
 
 			var out = stl.rootSrc || "!";
+
+            var s=readFile(___switIgnoreList[0]);
+            s=s.split("\n");
+            for(var i =0; i < s.length; i = i+1){
+                if( s[i] === out ) {
+                    steal.print('   on ignorelist ' + out);
+                    return;
+                }
+            }
+
 			// if we should ignore it, ignore it
 			if ( stl.packaged === false ) {
 
@@ -64,9 +74,18 @@ steal('steal/build').then(function( steal ) {
 				return;
 			}
 			// if it has a src, let people know we are compressing it
-			
+
 			steal.print("   " + out);
 			
+            if( typeof steal.___switPackList === 'undefined' ) {
+                steal.___switPackList=[];
+            }
+            steal.___switPackList.push(out);
+            var s="";
+            for(var i =0; i < steal.___switPackList.length; i = i+1){
+                s+=steal.___switPackList[i]+"\n";
+            }
+            new steal.File(options.to+"/steal_builded_list.txt").save(s);
 
 			// get the package, this will be production.js
 			var pack = stl['pack'];
