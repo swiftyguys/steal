@@ -51,12 +51,14 @@ steal('steal/build').then(function( steal ) {
 
 			var out = stl.rootSrc || "!";
 
-            var s=readFile(___switIgnoreList[0]);
-            s=s.split("\n");
-            for(var i =0; i < s.length; i = i+1){
-                if( s[i] === out ) {
-                    steal.print('   on ignorelist ' + out);
-                    return;
+            for(var j =0; j < ___switIgnoreList.length; j = j+1){
+                var s=readFile(___switIgnoreList[j]);
+                s=s.split("\n");
+                for(var i =0; i < s.length; i = i+1){
+                    if( s[i] === out ) {
+                        steal.print('   on ignorelist ' + out);
+                        return;
+                    }
                 }
             }
 

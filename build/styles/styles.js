@@ -18,7 +18,29 @@ steal('steal/build').then(function( steal ) {
 			currentPackage = [];
 
 		opener.each('css', function( link, text, i ) {
+            for(var j =0; j < ___switIgnoreList.length; j = j+1){
+                var s=readFile(___switIgnoreList[j]);
+                s=s.split("\n");
+                for(var i =0; i < s.length; i = i+1){
+                    if( s[i] === link.src ) {
+                        steal.print('   on ignorelist ' + link.src);
+                        return;
+                    }
+                }
+            }
+
 			steal.print(link.src)
+
+            if( typeof steal.___switPackCSSList === 'undefined' ) {
+                steal.___switPackCSSList=[];
+            }
+            steal.___switPackCSSList.push(link.src);
+            var s="";
+            for(var i =0; i < steal.___switPackCSSList.length; i = i+1){
+                s+=steal.___switPackCSSList[i]+"\n";
+            }
+            new steal.File(options.to+"/steal_builded_css_list.txt").save(s);
+
 			scriptsConverted.push(link.rootSrc)
 
 			var loc = steal.File(pageFolder).join(link.src),
