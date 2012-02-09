@@ -1,7 +1,10 @@
 steal('steal/browser', 'steal/browser/utils/rhinoServer.js', function(){
-	var page;
+	var page,
+		expectedId = 1;
 	steal.browser.phantomjs = function(options){
-		steal.browser.call(this, options, 'phantomjs')
+		this.kill();
+		steal.browser.call(this, options, 'phantomjs');
+		this._startServer();
 	}
 	steal.extend(steal.browser.phantomjs, {
 		defaults:  {
@@ -27,7 +30,7 @@ steal('steal/browser', 'steal/browser/utils/rhinoServer.js', function(){
 			page = this._getPageUrl(page);
 			var verbose = this.options.print;
 			this.launcher = spawn(function(){
-				var cmd = "phantomjs steal/browser/phantomjs/launcher.js "+page+(verbose?  " -verbose": "");
+				var cmd = "phantomjs steal/browser/phantomjs/launcher.js "+'"'+page+'"'+(verbose?  " -verbose": "");
 				if (java.lang.System.getProperty("os.name").indexOf("Windows") != -1) {
 					runCommand("cmd", "/C", cmd)
 				}
@@ -50,17 +53,17 @@ steal('steal/browser', 'steal/browser/utils/rhinoServer.js', function(){
 			this.browserOpen = false;
 		},
 		kill: function(){
-			spawn(function(){
-				if (java.lang.System.getProperty("os.name").indexOf("Windows") != -1) {
-					runCommand("cmd", "/C", 'taskkill /f /fi "Imagename eq phantomjs.exe" > NUL')
-				} else { // mac
-					runCommand("sh", "-c", "ps aux | awk '/phantomjs\\/launcher/ {print$2}' | xargs kill -9 &> /dev/null")
-				}
-			})
+			if (java.lang.System.getProperty("os.name").indexOf("Windows") != -1) {
+				runCommand("cmd", "/C", 'taskkill /f /fi "Imagename eq phantomjs.exe" > NUL')
+			} else { // mac
+				runCommand("sh", "-c", "ps aux | awk '/phantomjs\\/launcher/ {print$2}' | xargs kill -9 &> /dev/null")
+			}
 		},
 		_processData: function(data){
-			var d = decodeURIComponent(unescape(data));
-//			print("_processData: "+d)
+			var a = decodeURIComponent(data);
+			// print("_processData0: "+a)
+			var d = unescape(a);
+			// print("_processData: "+d)
 			eval("var res = "+d)
 			// parse data into res
 			for (var i = 0; i < res.length; i++) {
@@ -71,7 +74,13 @@ steal('steal/browser', 'steal/browser/utils/rhinoServer.js', function(){
 				this._evts[evt.id] = true
 				var self = this;
 				(function(e){
+					// spawn to avoid deadlock, but also enforce event ordering
 					spawn(function(){
+						var id = parseInt(e.id);
+						while(id !== expectedId){
+							java.lang.Thread.currentThread().sleep(100);
+						}
+						expectedId++;
 						self.trigger(e.type, e.data);
 					})
 				})(evt)
@@ -93,9 +102,10 @@ steal('steal/browser', 'steal/browser/utils/rhinoServer.js', function(){
 			}
 			this.server.sendJS(script);
 		},
-		evaluate: function(fn){
+		// for now, only one arg, and it has to be a string
+		evaluate: function(fn, arg){
 			var evalText = fn.toString().replace(/\n|\r\n/g,""),
-				scriptText = "return steal.client.evaluate('"+evalText+"');";
+				scriptText = "return steal.client.evaluate('"+evalText+"', '"+arg+"');";
 				
 			this.sendJS(scriptText);
 			this.attr("evaluateInProgress", true);

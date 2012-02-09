@@ -1,7 +1,15 @@
 steal(function(s){
+	
+	// Methods for walking through steal and its dependencies
+	
+	// which steals have been touched in this cycle
 	var touched = {},
+		
 		//recursively goes through dependencies
-		breadth = function(stl, CB){
+		// stl - a steal
+		// CB - a callback for each steal
+		// depth - true if it should be depth first search, defaults to breadth
+		iterate = function(stl, CB, depth){
 			// load each dependency until
 			var i =0,
 				depends = stl.dependencies.slice(0); 
@@ -16,7 +24,7 @@ steal(function(s){
 					var steals = depends.splice(0,i);
 					
 					// load all these steals, and their dependencies
-					loadset(steals, CB);
+					loadset(steals, CB, depth);
 					
 					// does it need to load the depend itself?
 					
@@ -30,29 +38,44 @@ steal(function(s){
 			
 			// if there's a remainder, load them
 			if(depends.length){
-				loadset(depends, CB);
+				loadset(depends, CB, depth);
 			}
 		  
 		},
 		// loads each steal 'in parallel', then 
 		// loads their dependencies one after another
-		loadset = function(steals, CB){
+		loadset = function(steals, CB, depth){
+			// doing depth first
+			if(depth){
+				// do dependencies first
+				eachSteal(steals, CB, depth)
+				
+				// then mark
+				touch(steals, CB);
+			} else {
+				touch(steals, CB);
+				eachSteal(steals, CB, depth)
+			}
+		},
+		touch = function(steals, CB){
 			for(var i =0; i < steals.length; i++){
-				//print("  Touching "+steals[i].path)
+				// print("  Touching "+steals[i].options.rootSrc)
 				if(!touched[steals[i].options.rootSrc]){
+					
 					CB( steals[i] );
 					touched[steals[i].options.rootSrc] = true;
 				}
 				
 			}
+		},
+		eachSteal = function(steals, CB, depth){
 			for(var i =0; i < steals.length; i++){
-				breadth(steals[i], CB)
+				iterate(steals[i], CB, depth)
 			}
 		},
 		window = (function() {
 			return this;
-		}).call(null, 0),
-		loadScriptText = steal.build.loadScriptText;
+		}).call(null, 0);
 	/**
 	 * @function open
 	 * 
@@ -68,12 +91,14 @@ steal(function(s){
 	 * the content for a certain tag slightly easier.
 	 * 
 	 */ 
-	steal.build.open = function( url, stealData, cb ) {
-		var scripts = [],
-
-			// save and remove the old steal
+	steal.build.open = function( url, stealData, cb, depth ) {
+		
+		
+		var // save and remove the old steal
 			oldSteal = window.steal || steal,
 			newSteal;
+			
+		
 		delete window.steal;
 		if ( typeof stealData == 'object') {
 			window.steal = stealData;
@@ -84,8 +109,14 @@ steal(function(s){
 		load('steal/rhino/env.js'); //reload every time
 		// open the url
 		
+		// what gets called by steal.done
+		// - init the 'master' steal
 		var doneCb = function(init){
+			
+			// clear timers
 			Envjs.clear();
+			
+			// callback with the following
 			cb({
 				/**
 				 * @hide
@@ -95,6 +126,7 @@ steal(function(s){
 				 * @param {Object} func a function to call back with the element and its content
 				 */
 				each: function( filter, func ) {
+					// reset touched
 					touched = {};
 					if ( !func ) {
 						func = filter;
@@ -107,18 +139,19 @@ steal(function(s){
 						}
 					}
 					
-					breadth(init, function(stealer){
+					iterate(init, function(stealer){
 						
 						if(filter(stealer)){
-							func(stealer.options, stealer.options.text || loadScriptText(stealer.options) )
+							func(stealer.options, stealer.options.text || loadScriptText(stealer.options), stealer )
 						}
-					});
+					}, depth );
 				},
 				// the 
 				steal: newSteal,
-				url: url
+				url: url,
+				firstSteal : init
 			})
-		}
+		};
 		
 		Envjs(url, {
 			scriptTypes: {
@@ -129,9 +162,6 @@ steal(function(s){
 			fireLoad: true,
 			logLevel: 2,
 			afterScriptLoad: {
-				".*": function( script ) {
-					scripts.push(script);
-				},
 				// prevent $(document).ready from being called even though load is fired
 				"jquery.js": function( script ) {
 					jQuery.readyWait++;
@@ -142,12 +172,6 @@ steal(function(s){
 					window.steal.one('done', doneCb);
 				}
 			},
-			onLoadUnknownTypeScript: function( script ) {
-				scripts.push(script);
-			},
-			afterInlineScriptLoad: function( script ) {
-				scripts.push(script);
-			},
 			dontPrintUserAgent: true
 		});
 		
@@ -155,14 +179,6 @@ steal(function(s){
 		newSteal = window.steal;
 		window.steal = oldSteal;
 		window.steal._steal = newSteal;
-
-
-		// check if newSteal added any build types (used to convert less to css for example).
-		if(newSteal && newSteal.build && newSteal.build.types){
-			for ( var buildType in newSteal.build.types ) {
-				oldSteal.build.types[buildType] = newSteal.build.types[buildType];
-			}
-		}
 
 		Envjs.wait();
 	};
